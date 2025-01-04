@@ -1,4 +1,4 @@
-module jarvis
+module sqli
 
 go 1.23.4
 
